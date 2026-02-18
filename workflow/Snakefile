@@ -1,0 +1,12 @@
+configfile: "config/config.yaml"
+
+rule all:
+    input:
+        "results/qc/multiqc_report.html",
+        "results/plots/umap_rna.png",
+        "results/plots/umap_atac.png",
+        "results/plots/umap_wnn.png"
+
+# Include modular rules
+include: "rules/qc.smk"
+include: "rules/analysis.smk"

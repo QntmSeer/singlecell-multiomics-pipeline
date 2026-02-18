@@ -1,0 +1,12 @@
+# Data
+data/
+results/
+.snakemake/
+__pycache__/
+*.h5mu
+*.h5ad
+*.bam
+*.fastq.gz
+.DS_Store
+.idea/
+.vscode/
