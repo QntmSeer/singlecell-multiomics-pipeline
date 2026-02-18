@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![Version](https://img.shields.io/badge/version-v1.0.0--stable--local-green)
 
-## 🧬 Project Overview
+## 📽️ Project Overview
 
 This repository contains a reproducible, containerized bioinformatics pipeline for the analysis of **single-cell multi-omics data (scRNA-seq + scATAC-seq)**. The workflow is built using **Snakemake** and utilises **Scanpy** and **Muon** for the integration of transcriptomic and chromatin accessibility modalities.
 
@@ -29,9 +29,9 @@ Raw Data (10x HDF5 + ATAC Fragments)
    └────┬────┘
         │
         ▼
-   ┌──────────────┐
+   ┌───────────────┐
    │ Preprocessing │  ← Normalize, Log1p, HVG selection
-   └──────┬───────┘
+   └──────┬────────┘
           │
           ▼
    ┌──────────────┐
@@ -80,7 +80,7 @@ singlecell-multiomics-pipeline/
 └── README.md
 ```
 
-## 🚀 Usage
+## 🛰️ Usage
 
 ### Tested Environment
 - Python 3.9
