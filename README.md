@@ -160,5 +160,5 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 ## 🔗 Data Source
 
-[10k Human PBMCs, Multiome v1.0, Chromium X — 10x Genomics](https://www.10xgenomics.com/datasets/10k-human-pbmcs-multiome-v1-0-chromium-x-1-standard-2-0-0)
+[10k Human PBMCs, Multiome v1.0, Chromium X - 10x Genomics](https://www.10xgenomics.com/datasets/10-k-human-pbm-cs-multiome-v-1-0-chromium-x-1-standard-2-0-0)
 Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
