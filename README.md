@@ -128,11 +128,24 @@ singlecell-multiomics-pipeline/
 
 | Output | Location | Description |
 |--------|----------|-------------|
-| QC Metrics | `results/qc/qc_metrics.txt` | Per-cell QC summary |
-| MultiQC Report | `results/qc/multiqc_report.html` | Aggregated QC |
-| RNA UMAP | `results/plots/umap_rna.png` | Leiden clusters by RNA |
-| ATAC UMAP | `results/plots/umap_atac.png` | Leiden clusters by ATAC |
-| WNN UMAP | `results/plots/umap_wnn.png` | Integrated multi-modal UMAP |
+| QC Metrics | `results/qc/qc_metrics.txt` | Per-cell QC summary (generated at runtime) |
+| MultiQC Report | `results/qc/multiqc_report.html` | Aggregated QC (generated at runtime) |
+| RNA UMAP | `example_results/umap_rna.png` | 17 Leiden clusters by RNA |
+| Marker Gene UMAP | `example_results/umap_atac.png` | CD3D / CD14 / MS4A1 / GNLY expression |
+| QC Overlay UMAP | `example_results/umap_wnn.png` | Mito% and genes-per-cell overlay |
+
+## 🖼️ Example Results
+
+> Generated from 10k PBMC Multiome dataset (10x Genomics). **17 Leiden clusters** identified, with clear immune cell population separation across T cells, Monocytes, B cells, and NK cells. Mitochondrial % overlay confirms effective QC filtering.
+
+**RNA UMAP — 17 Leiden Clusters**
+![RNA UMAP](example_results/umap_rna.png)
+
+**Immune Cell Marker Genes (CD3D · CD14 · MS4A1 · GNLY)**
+![Marker Gene UMAP](example_results/umap_atac.png)
+
+**QC Metrics Overlay (Mito% · Genes per Cell)**
+![QC Overlay UMAP](example_results/umap_wnn.png)
 
 ## 🐳 Docker
 
