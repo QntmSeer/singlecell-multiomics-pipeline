@@ -134,6 +134,7 @@ singlecell-multiomics-pipeline/
 | ATAC UMAP | `example_results/umap_atac.png` | UMAP based on Chromatin Accessibility (LSI) |
 | WNN UMAP | `example_results/umap_wnn.png` | Joint Multi-Modal Integration (Weighted Nearest Neighbors) |
 | Marker Genes | `example_results/umap_markers.png` | Immune cell marker expression (CD3D, CD14, MS4A1, GNLY) |
+| Pseudotime UMAP | `example_results/trajectory_pseudotime.png` | Continuous developmental timeline (Classical $\to$ Non-Classical) |
 
 ## 🖼️ Example Results
 
@@ -150,6 +151,12 @@ singlecell-multiomics-pipeline/
 
 **4. Immune Marker Genes**
 ![Marker Gene UMAP](example_results/umap_markers.png)
+
+**Phase 3: Trajectory Inference (Monocyte Differentiation)**
+> Modeling the transition from **Classical Monocytes** ($CD14^{high}$) to **Non-Classical Monocytes** ($FCGR3A^+$) using PAGA and Diffusion Pseudotime. This demonstrates the pipeline's ability to unravel cellular heterogeneity and dynamic adaptation.
+
+**5. Developmental Pseudotime**
+![Pseudotime UMAP](example_results/trajectory_pseudotime.png)
 
 ## 🐳 Docker
 

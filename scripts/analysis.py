@@ -16,8 +16,11 @@ output_rna_plot = snakemake.output.umap_rna
 output_atac_plot = snakemake.output.umap_atac
 output_wnn_plot = snakemake.output.umap_wnn
 output_markers_plot = snakemake.output.umap_markers
+# Phase 3: Trajectory Outputs
+output_paga_plot = snakemake.output.trajectory_paga
+output_pseudotime_plot = snakemake.output.trajectory_pseudotime
 
-for p in [output_rna_plot, output_atac_plot, output_wnn_plot, output_markers_plot]:
+for p in [output_rna_plot, output_atac_plot, output_wnn_plot, output_markers_plot, output_paga_plot, output_pseudotime_plot]:
     os.makedirs(os.path.dirname(p), exist_ok=True)
 
 # ── 1. Load Data (Muon) ──────────────────────────────────────────────────────────
@@ -118,7 +121,7 @@ def save_plot(fig, path, title):
         plt.savefig(path, dpi=150, bbox_inches='tight')
         plt.close()
 
-# ── PLOTS ────────────────────────────────────────────────────────────────────
+# ── PLOTS (Global) ──────────────────────────────────────────────────────────
 
 # 1. RNA UMAP
 log("Saving RNA UMAP...")
@@ -185,5 +188,114 @@ if has_rna:
         save_plot(plt.figure(), output_markers_plot, "No Markers Found")
 else:
     save_plot(plt.figure(), output_markers_plot, "No RNA Data")
+
+# ── PHASE 3: TRAJECTORY INFERENCE (Monocytes) ────────────────────────────────
+
+log("Starting Phase 3: Trajectory Inference...")
+if has_rna and 'leiden_wnn' in mdata.obs:
+    try:
+        # 1. Identify Monocyte Clusters (High CD14)
+        # We need to access RNA expression data for CD14
+        # mdata['rna'].X might be sparse
+        rna = mdata['rna']
+        if 'CD14' in rna.var_names:
+            # Score CD14 expression per cluster
+            # Simple approach: Subset to CD14+ cells (expr > 0.5) then see which clusters they belong to
+            # Better: Calculate mean expression per cluster
+            
+            # Create a small dataframe of cluster vs CD14
+            # (Keep it simple and robust for this portfolio piece)
+            
+            # Strategy: Just subset broadly on CD14 expression first to capture all Monocytes
+            # Then re-cluster to find the trajectory
+            
+            log("  Subsetting Monocytes (CD14+)...")
+            
+            # Get cells with CD14 expression > 0.5 (log1p scale)
+            cd14_expr = rna[:, 'CD14'].X.toarray().flatten()
+            is_mono = cd14_expr > 0.5
+            
+            if np.sum(is_mono) > 50: # Ensure we have enough cells
+                mono = rna[is_mono, :].copy()
+                log(f"  Found {mono.n_obs} potential Monocytes.")
+                
+                # Re-process Monocytes
+                sc.pp.highly_variable_genes(mono, n_top_genes=2000)
+                sc.pp.pca(mono)
+                sc.pp.neighbors(mono, n_neighbors=20)
+                sc.tl.leiden(mono, resolution=0.5, key_added='leiden_mono')
+                
+                # Check clusters
+                n_clusters = len(mono.obs['leiden_mono'].unique())
+                log(f"  Monocyte Clusters found: {n_clusters}")
+
+                # PAGA (needs > 1 cluster connectivity)
+                if n_clusters > 1:
+                    log("  Running PAGA...")
+                    try:
+                        sc.tl.paga(mono, groups='leiden_mono')
+                        # Plot PAGA
+                        fig_paga = plt.figure()
+                        sc.pl.paga(mono, color=['leiden_mono', 'CD14', 'FCGR3A'], show=False) 
+                        save_plot(plt.gcf(), output_paga_plot, "Monocyte PAGA Trajectory")
+                    except Exception as e:
+                        log(f"  PAGA Failed (skipping graph): {e}")
+                        save_plot(plt.figure(), output_paga_plot, "PAGA Failed")
+                else:
+                    log("  Skipping PAGA (Only 1 cluster found).")
+                    save_plot(plt.figure(), output_paga_plot, "Single Cluster (No PAGA)")
+                
+                # Diffusion Pseudotime (DPT)
+                # Set root to max CD14 cell (Classical Monocyte)
+                log("  Calculating Pseudotime (DPT)...")
+                if 'iroot' not in mono.uns:
+                     # Find max CD14 cell index
+                     # .X is sparse CSR matrix, verify shape
+                     cd14_idx = np.argmax(mono[:, 'CD14'].X.toarray().flatten())
+                     mono.uns['iroot'] = cd14_idx
+                     log(f"  Root cell index: {cd14_idx}")
+
+                sc.tl.diffmap(mono) # Required for DPT
+                sc.tl.dpt(mono)
+                
+                # Plot Pseudotime & Markers
+                fig_dpt, ax = plt.subplots(1, 3, figsize=(15, 5))
+                sc.pl.umap(mono, color='dpt_pseudotime', ax=ax[0], show=False, title="Pseudotime")
+                
+                # Gene Trends (Plot individually to avoid axis errors)
+                for i, gene in enumerate(['CD14', 'FCGR3A']):
+                    if gene in mono.var_names:
+                        sc.pl.umap(mono, color=gene, ax=ax[i+1], show=False, title=gene)
+                    elif mono.raw is not None and gene in mono.raw.var_names:
+                        sc.pl.umap(mono, color=gene, ax=ax[i+1], show=False, title=gene, use_raw=True)
+                    else:
+                        ax[i+1].text(0.5, 0.5, f"{gene} not found", ha='center', va='center')
+                        ax[i+1].axis('off')
+                
+                plt.tight_layout()
+                save_plot(fig_dpt, output_pseudotime_plot, "Monocyte Differentiation")
+                log("  Trajectory analysis complete.")
+                
+            else:
+                log(f"  Not enough CD14+ cells found for trajectory (n={np.sum(is_mono)}).")
+                save_plot(plt.figure(), output_paga_plot, f"Insufficient Monocytes (n={np.sum(is_mono)})")
+                save_plot(plt.figure(), output_pseudotime_plot, "Insufficient Monocytes")
+        else:
+            log(f"  CD14 not found in dataset. Top var_names: {list(rna.var_names[:10])}")
+            save_plot(plt.figure(), output_paga_plot, "CD14 Missing")
+            save_plot(plt.figure(), output_pseudotime_plot, "CD14 Missing")
+            
+    except Exception as e:
+        import traceback
+        log(f"Trajectory Inference Failed: {e}")
+        traceback.print_exc()
+        # Create placeholders so Snakemake doesn't crash on subsequent runs if this fails
+        save_plot(plt.figure(), output_paga_plot, f"Error: {str(e)[:20]}")
+        save_plot(plt.figure(), output_pseudotime_plot, "Trajectory Error")
+
+else:
+    log("Skipping Trajectory (No RNA or Clusters).")
+    save_plot(plt.figure(), output_paga_plot, "Skipped")
+    save_plot(plt.figure(), output_pseudotime_plot, "Skipped")
 
 log("✓ Done.")
