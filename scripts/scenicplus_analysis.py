@@ -54,7 +54,7 @@ def run_scenicplus_pipeline(rna_adata_path, fragments_path, motif_db_path, outpu
     print("6. Visualizing regulatory networks...")
     # Generate networks showing the main TFs driving inflammation
     # scenicplus.plotting.plot_network(scplus_obj, ...)
-    print(f"✓ SCENIC+ analysis completed. Outputs written to: {output_dir}")
+    print(f"[OK] SCENIC+ analysis completed. Outputs written to: {output_dir}")
 
 if __name__ == "__main__":
     print("SCENIC+ Template script loaded. Run this script in a python session with raw data.")

@@ -52,7 +52,7 @@ def run_multivelo_pipeline(rna_loom_path, atac_h5_path, output_plot_path):
         title='MultiVelo: Chromatin-Coupled Splicing Dynamics',
         save=output_plot_path
     )
-    print(f"✓ MultiVelo trajectory plot saved to: {output_plot_path}")
+    print(f"[OK] MultiVelo trajectory plot saved to: {output_plot_path}")
 
 if __name__ == "__main__":
     print("MultiVelo Template script loaded. Run this script in a python session with raw data.")
