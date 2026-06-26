@@ -1,16 +1,7 @@
 """
 Single-Cell Multi-Omics Analysis Pipeline
 ==========================================
-Performs joint RNA + ATAC analysis using Muon/Scanpy.
-
-Stages:
-    1. Data loading (10x Multiome HDF5)
-    2. QC & filtering
-    3. RNA processing (normalisation, HVG, PCA, UMAP, Leiden clustering)
-    4. ATAC processing (TF-IDF, LSI, UMAP, Leiden clustering)
-    5. Weighted Nearest Neighbor (WNN) multi-modal integration
-    6. Plotting (RNA, ATAC, WNN UMAPs & immune marker expression)
-    7. Trajectory inference on Monocyte subset (Diffusion Pseudotime)
+Performs joint RNA + ATAC analysis using Muon/Scanpy/scvi-tools/CellRank.
 """
 
 import scanpy as sc
@@ -19,99 +10,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 import os
+import scipy.sparse
 
 matplotlib.use("Agg")
 sc.settings.verbosity = 1
 np.random.seed(42)
-
-# ── I/O from Snakemake ────────────────────────────────────────────────────────
-rna_file             = snakemake.input.rna
-atac_file            = snakemake.input.atac
-output_rna_plot      = snakemake.output.umap_rna
-output_atac_plot     = snakemake.output.umap_atac
-output_wnn_plot      = snakemake.output.umap_wnn
-output_markers_plot  = snakemake.output.umap_markers
-output_paga_plot     = snakemake.output.trajectory_paga
-output_pseudotime_plot = snakemake.output.trajectory_pseudotime
-
-for p in [output_rna_plot, output_atac_plot, output_wnn_plot,
-          output_markers_plot, output_paga_plot, output_pseudotime_plot]:
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-console_log = []
-def log(msg):
-    print(msg)
-    console_log.append(msg)
-
-# ── 1. Load Data ──────────────────────────────────────────────────────────────
-log("Loading 10x Multiome data...")
-try:
-    mdata = mu.read_10x_h5(rna_file)
-    mdata.var_names_make_unique()
-except Exception as e:
-    log(f"Muon read failed ({e}). Falling back to RNA-only mode.")
-    mdata = mu.MuData({'rna': sc.read_10x_h5(rna_file)})
-    mdata.var_names_make_unique()
-
-has_atac = 'atac' in mdata.mod
-has_rna  = 'rna'  in mdata.mod
-log(f"Modalities detected: {list(mdata.mod.keys())}")
-
-# ── 2. QC & Filtering ─────────────────────────────────────────────────────────
-if has_rna:
-    log("Running QC...")
-    rna = mdata['rna']
-    rna.var["mt"] = rna.var_names.str.startswith("MT-")
-    sc.pp.calculate_qc_metrics(rna, qc_vars=["mt"], percent_top=None,
-                                log1p=False, inplace=True)
-    keep_cells = (
-        (rna.obs.n_genes_by_counts > 200)  &
-        (rna.obs.n_genes_by_counts < 6000) &
-        (rna.obs.pct_counts_mt    < 20)
-    )
-    # Filter globally to keep all modalities in sync
-    mdata = mdata[keep_cells, :].copy()
-    log(f"  {mdata.n_obs} cells retained after QC")
-
-# ── 3. RNA Processing ─────────────────────────────────────────────────────────
-if has_rna:
-    log("Processing RNA modality...")
-    rna = mdata['rna']
-    rna.var_names_make_unique()
-    sc.pp.normalize_total(rna, target_sum=1e4)
-    sc.pp.log1p(rna)
-    rna.raw = rna  # preserve pre-HVG expression for marker plotting
-    sc.pp.highly_variable_genes(rna, min_mean=0.0125, max_mean=3, min_disp=0.5)
-    sc.pp.pca(rna, svd_solver="arpack")
-    sc.pp.neighbors(rna, n_neighbors=15, n_pcs=40)
-    sc.tl.umap(rna)
-    sc.tl.leiden(rna, resolution=0.5, key_added='leiden_rna')
-
-# ── 4. ATAC Processing (LSI) ──────────────────────────────────────────────────
-if has_atac:
-    log("Processing ATAC modality (LSI)...")
-    atac = mdata['atac']
-    mu.atac.pp.tfidf(atac, scale_factor=1e4)
-    mu.atac.tl.lsi(atac)
-    sc.pp.neighbors(atac, use_rep='X_lsi', n_neighbors=15, n_pcs=40)
-    sc.tl.umap(atac)
-    sc.tl.leiden(atac, resolution=0.5, key_added='leiden_atac')
-
-# ── 5. WNN Integration ────────────────────────────────────────────────────────
-final_clusters = 'leiden_rna'
-if has_rna and has_atac:
-    log("Running WNN integration...")
-    mu.pp.neighbors(mdata)
-    mu.tl.umap(mdata)
-    mu.tl.leiden(mdata, key_added='leiden_wnn', resolution=0.5)
-
-    # Propagate joint clusters to individual modalities for downstream plotting
-    if 'leiden_wnn' in mdata.obs:
-        mdata['rna'].obs['leiden_wnn']  = mdata.obs['leiden_wnn']
-        mdata['atac'].obs['leiden_wnn'] = mdata.obs['leiden_wnn']
-
-    final_clusters = 'leiden_wnn'
 
 # ── Helper: Save Figure ───────────────────────────────────────────────────────
 def save_plot(fig, path, title):
@@ -126,84 +29,234 @@ def save_plot(fig, path, title):
         plt.savefig(path, dpi=150, bbox_inches='tight')
         plt.close()
 
-# ── 6. Plots ──────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    # ── I/O from Snakemake ────────────────────────────────────────────────────
+    rna_file             = snakemake.input.rna
+    output_rna_plot      = snakemake.output.umap_rna
+    output_atac_plot     = snakemake.output.umap_atac
+    output_wnn_plot      = snakemake.output.umap_wnn
+    output_multivi_plot  = snakemake.output.umap_multivi
+    output_cellrank_plot = snakemake.output.cellrank_trajectory
+    output_markers_plot  = snakemake.output.umap_markers
+    output_paga_plot     = snakemake.output.trajectory_paga
+    output_pseudotime_plot = snakemake.output.trajectory_pseudotime
 
-# 6a. RNA UMAP
-log("Saving RNA UMAP...")
-if has_rna:
+    for p in [output_rna_plot, output_atac_plot, output_wnn_plot,
+              output_multivi_plot, output_cellrank_plot,
+              output_markers_plot, output_paga_plot, output_pseudotime_plot]:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    console_log = []
+    def log(msg):
+        print(msg)
+        console_log.append(msg)
+
+    # ── 1. Load Data ──────────────────────────────────────────────────────────
+    log("Loading 10x Multiome data...")
     try:
-        fig = sc.pl.umap(mdata['rna'], color=final_clusters,
-                         title="RNA UMAP", return_fig=True, show=False)
-        save_plot(fig, output_rna_plot, "RNA Modality")
+        mdata = mu.read_10x_h5(rna_file)
+        mdata.var_names_make_unique()
     except Exception as e:
-        log(f"RNA UMAP failed: {e}")
-        save_plot(plt.figure(), output_rna_plot, "Plotting Error")
-else:
-    save_plot(plt.figure(), output_rna_plot, "No RNA")
+        log(f"Muon read failed ({e}). Falling back to RNA-only mode.")
+        mdata = mu.MuData({'rna': sc.read_10x_h5(rna_file)})
+        mdata.var_names_make_unique()
 
-# 6b. ATAC UMAP
-log("Saving ATAC UMAP...")
-if has_atac:
-    try:
-        fig = sc.pl.umap(mdata['atac'], color=final_clusters,
-                         title="ATAC UMAP", return_fig=True, show=False)
-        save_plot(fig, output_atac_plot, "ATAC Modality")
-    except Exception as e:
-        log(f"ATAC UMAP failed: {e}")
-        save_plot(plt.figure(), output_atac_plot, "Plotting Error")
-else:
-    save_plot(plt.figure(), output_atac_plot, "No ATAC")
+    has_atac = 'atac' in mdata.mod
+    has_rna  = 'rna'  in mdata.mod
+    log(f"Modalities detected: {list(mdata.mod.keys())}")
 
-# 6c. WNN UMAP
-log("Saving WNN UMAP...")
-if has_rna and has_atac:
-    try:
-        mu.pl.umap(mdata, color=final_clusters, title="WNN UMAP", show=False)
-        save_plot(plt.gcf(), output_wnn_plot, "WNN Integrated")
-    except Exception as e:
-        log(f"WNN UMAP failed: {e}")
-        save_plot(plt.figure(), output_wnn_plot, "Plotting Error")
-else:
-    save_plot(plt.figure(), output_wnn_plot, "WNN Unavailable")
-
-# 6d. Immune Marker Genes
-log("Saving immune marker plot...")
-markers = {"CD3D": "T cells", "CD14": "Monocytes", "MS4A1": "B cells", "GNLY": "NK cells"}
-if has_rna:
-    use_basis = 'X_umap'
-    if has_rna and has_atac and 'X_umap' in mdata.obsm:
-        mdata['rna'].obsm['X_umap_wnn'] = mdata.obsm['X_umap']
-        use_basis = 'X_umap_wnn'
-
-    present = {k: v for k, v in markers.items()
-               if k in mdata['rna'].raw.var_names}
-    if present:
-        fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-        axes = axes.flatten()
-        for i, (gene, label) in enumerate(present.items()):
-            sc.pl.embedding(mdata['rna'], basis=use_basis, color=gene,
-                            use_raw=True, color_map='Reds', ax=axes[i],
-                            show=False, frameon=False,
-                            title=f"{gene} ({label})")
-        for j in range(len(present), 4):
-            axes[j].axis('off')
-        save_plot(fig, output_markers_plot, "Immune Markers")
-    else:
-        save_plot(plt.figure(), output_markers_plot, "No Markers Found")
-else:
-    save_plot(plt.figure(), output_markers_plot, "No RNA Data")
-
-# ── 7. Trajectory Inference: Monocyte Differentiation ─────────────────────────
-# Subsets CD14+ cells and models the Classical → Non-Classical transition
-# using Partition-based Graph Abstraction (PAGA) and Diffusion Pseudotime (DPT).
-
-log("Starting trajectory inference (Monocyte subset)...")
-if has_rna and 'leiden_wnn' in mdata.obs:
-    try:
+    # ── 2. QC & Filtering ─────────────────────────────────────────────────────
+    if has_rna:
+        log("Running QC...")
         rna = mdata['rna']
-        if 'CD14' in rna.var_names:
-            cd14_expr = rna[:, 'CD14'].X.toarray().flatten()
-            is_mono   = cd14_expr > 0.5
+        rna.var["mt"] = rna.var_names.str.startswith("MT-")
+        sc.pp.calculate_qc_metrics(rna, qc_vars=["mt"], percent_top=None,
+                                    log1p=False, inplace=True)
+        keep_cells = (
+            (rna.obs.n_genes_by_counts > 200)  &
+            (rna.obs.n_genes_by_counts < 6000) &
+            (rna.obs.pct_counts_mt    < 20)
+        )
+        mdata = mdata[keep_cells, :].copy()
+        log(f"  {mdata.n_obs} cells retained after QC")
+
+    # ── 3. RNA Processing ─────────────────────────────────────────────────────
+    if has_rna:
+        log("Processing RNA modality...")
+        rna = mdata['rna']
+        rna.var_names_make_unique()
+        sc.pp.normalize_total(rna, target_sum=1e4)
+        sc.pp.log1p(rna)
+        rna.raw = rna
+        sc.pp.highly_variable_genes(rna, min_mean=0.0125, max_mean=3, min_disp=0.5)
+        sc.pp.pca(rna, svd_solver="arpack")
+        sc.pp.neighbors(rna, n_neighbors=15, n_pcs=40)
+        sc.tl.umap(rna)
+        sc.tl.leiden(rna, resolution=0.5, key_added='leiden_rna')
+
+    # ── 4. ATAC Processing (LSI) ──────────────────────────────────────────────
+    if has_atac:
+        log("Processing ATAC modality (LSI)...")
+        atac = mdata['atac']
+        mu.atac.pp.tfidf(atac, scale_factor=1e4)
+        mu.atac.tl.lsi(atac)
+        if 'X_lsi' in atac.obsm:
+            atac.obsm['X_lsi_clean'] = atac.obsm['X_lsi'][:, 1:]
+            sc.pp.neighbors(atac, use_rep='X_lsi_clean', n_neighbors=15, n_pcs=39)
+        else:
+            sc.pp.neighbors(atac, use_rep='X_lsi', n_neighbors=15, n_pcs=40)
+        sc.tl.umap(atac)
+        sc.tl.leiden(atac, resolution=0.5, key_added='leiden_atac')
+
+    # ── 5. WNN Integration ────────────────────────────────────────────────────
+    final_clusters = 'leiden_rna'
+    if has_rna and has_atac:
+        log("Running WNN integration...")
+        try:
+            mu.pp.neighbors(mdata)
+            mu.tl.umap(mdata)
+            mu.tl.leiden(mdata, key_added='leiden_wnn', resolution=0.5)
+            if 'leiden_wnn' in mdata.obs:
+                mdata['rna'].obs['leiden_wnn']  = mdata.obs['leiden_wnn']
+                mdata['atac'].obs['leiden_wnn'] = mdata.obs['leiden_wnn']
+            final_clusters = 'leiden_wnn'
+        except Exception as e:
+            log(f"WNN Integration failed: {e}")
+
+    # ── 6. MultiVI Deep Generative Integration ────────────────────────────────
+    has_scvi = False
+    try:
+        import scvi
+        has_scvi = True
+    except ImportError:
+        log("scvi-tools is not installed. Skipping MultiVI.")
+
+    if has_scvi and has_rna and has_atac:
+        log("Running MultiVI integration...")
+        try:
+            scvi.model.MULTIVI.setup_mudata(
+                mdata,
+                rna_layer=None,
+                atac_layer=None,
+                modalities={"rna_layer": "rna", "atac_layer": "atac"}
+            )
+            
+            import torch
+            torch.set_num_threads(min(8, os.cpu_count() or 4))
+            model = scvi.model.MULTIVI(mdata)
+            model.train(max_epochs=2, batch_size=256)
+            
+            mdata.obsm["X_multivi"] = model.get_latent_representation()
+            log("  MultiVI latent representation computed successfully.")
+            
+            sc.pp.neighbors(mdata, use_rep="X_multivi", key_added="multivi")
+            sc.tl.umap(mdata, neighbors_key="multivi")
+            sc.tl.leiden(mdata, resolution=0.5, key_added="leiden_multivi", neighbors_key="multivi")
+            
+            if 'leiden_multivi' in mdata.obs:
+                mdata['rna'].obs['leiden_multivi'] = mdata.obs['leiden_multivi']
+                mdata['atac'].obs['leiden_multivi'] = mdata.obs['leiden_multivi']
+                final_clusters = 'leiden_multivi'
+        except Exception as e:
+            log(f"  MultiVI failed: {e}. Falling back to standard embeddings.")
+
+    # ── 7. Plots ──────────────────────────────────────────────────────────────
+
+    # 7a. RNA UMAP
+    log("Saving RNA UMAP...")
+    if has_rna:
+        try:
+            fig = sc.pl.umap(mdata['rna'], color=final_clusters,
+                             title="RNA UMAP", return_fig=True, show=False)
+            save_plot(fig, output_rna_plot, "RNA Modality")
+        except Exception as e:
+            log(f"RNA UMAP failed: {e}")
+            save_plot(plt.figure(), output_rna_plot, "Plotting Error")
+    else:
+        save_plot(plt.figure(), output_rna_plot, "No RNA")
+
+    # 7b. ATAC UMAP
+    log("Saving ATAC UMAP...")
+    if has_atac:
+        try:
+            fig = sc.pl.umap(mdata['atac'], color=final_clusters,
+                             title="ATAC UMAP", return_fig=True, show=False)
+            save_plot(fig, output_atac_plot, "ATAC Modality")
+        except Exception as e:
+            log(f"ATAC UMAP failed: {e}")
+            save_plot(plt.figure(), output_atac_plot, "Plotting Error")
+    else:
+        save_plot(plt.figure(), output_atac_plot, "No ATAC")
+
+    # 7c. WNN UMAP
+    log("Saving WNN UMAP...")
+    if has_rna and has_atac and 'X_umap' in mdata.obsm:
+        try:
+            mu.pl.umap(mdata, color='leiden_wnn', title="WNN UMAP", show=False)
+            save_plot(plt.gcf(), output_wnn_plot, "WNN Integrated")
+        except Exception as e:
+            log(f"WNN UMAP failed: {e}")
+            save_plot(plt.figure(), output_wnn_plot, "Plotting Error")
+    else:
+        save_plot(plt.figure(), output_wnn_plot, "WNN Unavailable")
+
+    # 7d. MultiVI UMAP
+    log("Saving MultiVI UMAP...")
+    if 'X_multivi' in mdata.obsm:
+        try:
+            sc.pl.umap(mdata, color='leiden_multivi', title="MultiVI UMAP", show=False)
+            save_plot(plt.gcf(), output_multivi_plot, "MultiVI Integrated")
+        except Exception as e:
+            log(f"MultiVI UMAP failed: {e}")
+            save_plot(plt.figure(), output_multivi_plot, "Plotting Error")
+    else:
+        save_plot(plt.figure(), output_multivi_plot, "MultiVI Unavailable")
+
+    # 7e. Immune Marker Genes
+    log("Saving immune marker plot...")
+    markers = {"CD3D": "T cells", "CD14": "Monocytes", "MS4A1": "B cells", "GNLY": "NK cells"}
+    if has_rna:
+        use_basis = 'X_umap'
+        if has_rna and has_atac and 'X_umap' in mdata.obsm:
+            mdata['rna'].obsm['X_umap_wnn'] = mdata.obsm['X_umap']
+            use_basis = 'X_umap_wnn'
+
+        present = {k: v for k, v in markers.items() if k in rna.var_names}
+        if present:
+            fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+            axes = axes.flatten()
+            for i, (gene, label) in enumerate(present.items()):
+                sc.pl.embedding(mdata['rna'], basis=use_basis, color=gene,
+                                use_raw=True, color_map='Reds', ax=axes[i],
+                                show=False, frameon=False,
+                                title=f"{gene} ({label})")
+            for j in range(len(present), 4):
+                axes[j].axis('off')
+            save_plot(fig, output_markers_plot, "Immune Markers")
+        else:
+            save_plot(plt.figure(), output_markers_plot, "No Markers Found")
+    else:
+        save_plot(plt.figure(), output_markers_plot, "No RNA Data")
+
+    # ── 8. Trajectory Inference & CellRank 2 Unified Fate Mapping ─────────────
+    log("Starting trajectory inference (Monocyte subset)...")
+    if has_rna and final_clusters in mdata.obs:
+        try:
+            rna = mdata['rna']
+            
+            def get_gene_expr(adata, gene_name):
+                if gene_name not in adata.var_names:
+                    return np.zeros(adata.n_obs)
+                expr = adata[:, gene_name].X
+                if scipy.sparse.issparse(expr):
+                    return expr.toarray().flatten()
+                return np.asarray(expr).flatten()
+
+            cd14_expr = get_gene_expr(rna, 'CD14')
+            fcgr3a_expr = get_gene_expr(rna, 'FCGR3A')
+            
+            is_mono = (cd14_expr > 0.5) | (fcgr3a_expr > 0.5)
 
             if np.sum(is_mono) > 50:
                 mono = rna[is_mono, :].copy()
@@ -212,75 +265,137 @@ if has_rna and 'leiden_wnn' in mdata.obs:
                 sc.pp.highly_variable_genes(mono, n_top_genes=2000)
                 sc.pp.pca(mono)
                 sc.pp.neighbors(mono, n_neighbors=20)
+                sc.tl.umap(mono)
                 sc.tl.leiden(mono, resolution=0.5, key_added='leiden_mono')
 
                 n_clusters = len(mono.obs['leiden_mono'].unique())
                 log(f"  Monocyte sub-clusters: {n_clusters}")
 
-                # PAGA — abstract connectivity graph between sub-clusters
+                # 8a. PAGA Trajectory Graph
                 if n_clusters > 1:
                     log("  Computing PAGA...")
                     try:
                         sc.tl.paga(mono, groups='leiden_mono')
-                        sc.pl.paga(mono, color=['leiden_mono', 'CD14', 'FCGR3A'],
-                                   show=False)
-                        save_plot(plt.gcf(), output_paga_plot,
-                                  "Monocyte PAGA Trajectory")
+                        sc.pl.paga(mono, color=['leiden_mono', 'CD14', 'FCGR3A'], show=False)
+                        save_plot(plt.gcf(), output_paga_plot, "Monocyte PAGA Trajectory")
                     except Exception as e:
                         log(f"  PAGA skipped: {e}")
                         save_plot(plt.figure(), output_paga_plot, "PAGA Failed")
                 else:
-                    save_plot(plt.figure(), output_paga_plot,
-                              "Single Cluster (No PAGA)")
+                    save_plot(plt.figure(), output_paga_plot, "Single Cluster (No PAGA)")
 
-                # Diffusion Pseudotime — root at cell with highest CD14 expression
+                # 8b. Diffusion Pseudotime
                 log("  Computing Diffusion Pseudotime...")
-                cd14_idx = np.argmax(mono[:, 'CD14'].X.toarray().flatten())
+                cd14_idx = np.argmax(get_gene_expr(mono, 'CD14'))
                 mono.uns['iroot'] = cd14_idx
                 sc.tl.diffmap(mono)
                 sc.tl.dpt(mono)
 
-                # Plot: pseudotime + CD14 + FCGR3A side-by-side
+                # 8c. CellRank 2 Fate Mapping
+                has_cellrank = False
+                try:
+                    import cellrank as cr
+                    has_cellrank = True
+                except ImportError:
+                    log("  cellrank is not installed. Skipping CellRank 2.")
+
+                if has_cellrank:
+                    log("  Running CellRank 2...")
+                    try:
+                        pk = cr.kernels.PseudotimeKernel(mono, time_key="dpt_pseudotime")
+                        pk.compute_transition_matrix()
+                        
+                        estimator = cr.estimators.GPCCA(pk)
+                        estimator.compute_macrostates(n_states=2, cluster_key="leiden_mono")
+                        estimator.predict_terminal_states()
+                        estimator.compute_fate_probabilities()
+                        
+                        fig_cr, axes_cr = plt.subplots(1, 2, figsize=(12, 5))
+                        if len(estimator.fate_probabilities.names) >= 3:
+                            cr.pl.circular_projection(mono, keys="leiden_mono", ax=axes_cr[0], show=False)
+                            axes_cr[0].set_title("Transition Connectivity Graph")
+                        else:
+                            estimator.plot_macrostates(which="all", ax=axes_cr[0], show=False)
+                            axes_cr[0].set_title("Predicted Macrostates")
+                        
+                        # Custom drawing for fate probabilities on axes_cr[1] (CellRank 2 same_plot ignores ax)
+                        def plot_fate_on_ax(adata, data, ax, basis="umap"):
+                            coords = adata.obsm[f"X_{basis}"]
+                            s = (120_000 / adata.n_obs + 20) / 2
+                            ax.scatter(coords[:, 0], coords[:, 1], c="lightgrey", s=s, alpha=0.2, marker=".", edgecolors="none")
+                            vals = np.clip(data.X, 0, None)
+                            names = list(data.names)
+                            lin_colors = list(data.colors)
+                            n_lineages = len(names)
+                            sorted_idx = np.argsort(vals, axis=1)[:, ::-1][:, :2]
+                            for id0 in range(n_lineages):
+                                for id1 in range(id0 + 1, n_lineages):
+                                    cell_mask = np.array([(id0 in row and id1 in row) for row in sorted_idx], dtype=bool)
+                                    if np.sum(cell_mask) < 2:
+                                        continue
+                                    c_vals = vals[cell_mask, id1] - vals[cell_mask, id0]
+                                    c_coords = coords[cell_mask]
+                                    from matplotlib.colors import to_rgba, LinearSegmentedColormap
+                                    rgba_a = np.array(to_rgba(lin_colors[id0]))
+                                    rgba_b = np.array(to_rgba(lin_colors[id1]))
+                                    cmap_colors = [
+                                        (*rgba_a[:3], 1.0),
+                                        (1.0, 1.0, 1.0, 0.0),
+                                        (*rgba_b[:3], 1.0),
+                                    ]
+                                    cmap = LinearSegmentedColormap.from_list(f"_cr_{id0}_{id1}", cmap_colors, N=256)
+                                    abs_max = np.max(np.abs(c_vals)) if np.max(np.abs(c_vals)) > 0 else 1.0
+                                    c_normed = (c_vals / abs_max + 1) / 2
+                                    order = np.argsort(np.abs(c_vals))
+                                    ax.scatter(c_coords[order, 0], c_coords[order, 1], c=c_normed[order], cmap=cmap, vmin=0, vmax=1, s=s, marker=".", edgecolors="none")
+                            handles = [plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=c, label=n, markersize=8) for n, c in zip(names, lin_colors)]
+                            ax.legend(handles=handles, frameon=False, loc="center left", bbox_to_anchor=(1.04, 0.5))
+                            ax.set_xticks([])
+                            ax.set_yticks([])
+                            ax.set_xlabel("UMAP1")
+                            ax.set_ylabel("UMAP2")
+
+                        plot_fate_on_ax(mono, estimator.fate_probabilities, axes_cr[1])
+                        axes_cr[1].set_title("Absorption Probabilities")
+                        
+                        plt.tight_layout()
+                        save_plot(fig_cr, output_cellrank_plot, "CellRank 2 Unified Fate Mapping")
+                        log("  CellRank 2 complete.")
+                    except Exception as e:
+                        log(f"  CellRank 2 failed: {e}. Saving empty plot.")
+                        save_plot(plt.figure(), output_cellrank_plot, f"CellRank Error: {str(e)[:30]}")
+                else:
+                    save_plot(plt.figure(), output_cellrank_plot, "CellRank Not Installed")
+
+                # 8d. Dynamic Pseudotime Plot
                 fig_dpt, ax = plt.subplots(1, 3, figsize=(15, 5))
-                sc.pl.umap(mono, color='dpt_pseudotime', ax=ax[0],
-                           show=False, title="Pseudotime")
+                sc.pl.umap(mono, color='dpt_pseudotime', ax=ax[0], show=False, title="Pseudotime")
                 for i, gene in enumerate(['CD14', 'FCGR3A']):
                     if gene in mono.var_names:
-                        sc.pl.umap(mono, color=gene, ax=ax[i + 1],
-                                   show=False, title=gene)
-                    elif mono.raw and gene in mono.raw.var_names:
-                        sc.pl.umap(mono, color=gene, ax=ax[i + 1],
-                                   show=False, title=gene, use_raw=True)
+                        sc.pl.umap(mono, color=gene, ax=ax[i + 1], show=False, title=gene)
                     else:
-                        ax[i + 1].text(0.5, 0.5, f"{gene} not found",
-                                       ha='center', va='center')
+                        ax[i + 1].text(0.5, 0.5, f"{gene} not found", ha='center', va='center')
                         ax[i + 1].axis('off')
-
                 plt.tight_layout()
-                save_plot(fig_dpt, output_pseudotime_plot,
-                          "Monocyte Differentiation")
+                save_plot(fig_dpt, output_pseudotime_plot, "Monocyte Differentiation Timeline")
                 log("  Trajectory analysis complete.")
 
             else:
-                log(f"  Too few CD14+ cells (n={np.sum(is_mono)}); skipping.")
+                log(f"  Too few monocytes (n={np.sum(is_mono)}); skipping trajectory.")
                 save_plot(plt.figure(), output_paga_plot, "Insufficient Monocytes")
-                save_plot(plt.figure(), output_pseudotime_plot,
-                          "Insufficient Monocytes")
-        else:
-            log("  CD14 not detected in dataset; skipping trajectory.")
-            save_plot(plt.figure(), output_paga_plot, "CD14 Missing")
-            save_plot(plt.figure(), output_pseudotime_plot, "CD14 Missing")
+                save_plot(plt.figure(), output_pseudotime_plot, "Insufficient Monocytes")
+                save_plot(plt.figure(), output_cellrank_plot, "Insufficient Monocytes")
+        except Exception as e:
+            log(f"Trajectory inference failed: {e}")
+            save_plot(plt.figure(), output_paga_plot, "Trajectory Error")
+            save_plot(plt.figure(), output_pseudotime_plot, "Trajectory Error")
+            save_plot(plt.figure(), output_cellrank_plot, "Trajectory Error")
+    else:
+        log("Skipping trajectory (no RNA or clusters detected).")
+        save_plot(plt.figure(), output_paga_plot, "Skipped")
+        save_plot(plt.figure(), output_pseudotime_plot, "Skipped")
+        save_plot(plt.figure(), output_cellrank_plot, "Skipped")
 
-    except Exception as e:
-        import traceback
-        log(f"Trajectory inference failed: {e}")
-        traceback.print_exc()
-        save_plot(plt.figure(), output_paga_plot, f"Error: {str(e)[:30]}")
-        save_plot(plt.figure(), output_pseudotime_plot, "Trajectory Error")
+    log("Done. Analysis complete.")
 
-else:
-    log("Skipping trajectory (no RNA or WNN clusters detected).")
-    save_plot(plt.figure(), output_paga_plot, "Skipped")
-    save_plot(plt.figure(), output_pseudotime_plot, "Skipped")
 
-log("✓ Analysis complete.")
