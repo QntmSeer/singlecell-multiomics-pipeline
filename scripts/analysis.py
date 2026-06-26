@@ -144,8 +144,32 @@ if __name__ == "__main__":
             
             import torch
             torch.set_num_threads(min(8, os.cpu_count() or 4))
+            
+            # GPU Auto-detection
+            use_gpu = torch.cuda.is_available()
+            log(f"  GPU Auto-detection: CUDA available = {use_gpu}")
+            if use_gpu:
+                log(f"  CUDA Device Name: {torch.cuda.get_device_name(0)}")
+            
+            # Safe training execution supporting both new (accelerator/devices) and old (use_gpu) scvi-tools versions
+            train_kwargs = {"max_epochs": 2, "batch_size": 256}
+            import inspect
+            sig = inspect.signature(scvi.model.MULTIVI.train)
+            if "accelerator" in sig.parameters:
+                train_kwargs["accelerator"] = "gpu" if use_gpu else "cpu"
+                train_kwargs["devices"] = 1 if use_gpu else "auto"
+            else:
+                train_kwargs["use_gpu"] = use_gpu
+                
             model = scvi.model.MULTIVI(mdata)
-            model.train(max_epochs=2, batch_size=256)
+            model.train(**train_kwargs)
+            
+            # Clean PyTorch memory cache if using GPU
+            if use_gpu:
+                torch.cuda.empty_cache()
+            
+            import gc
+            gc.collect()
             
             mdata.obsm["X_multivi"] = model.get_latent_representation()
             log("  MultiVI latent representation computed successfully.")
@@ -395,6 +419,26 @@ if __name__ == "__main__":
         save_plot(plt.figure(), output_paga_plot, "Skipped")
         save_plot(plt.figure(), output_pseudotime_plot, "Skipped")
         save_plot(plt.figure(), output_cellrank_plot, "Skipped")
+
+    # ── 9. Export to Zarr for Large-Scale Out-of-Core Processing ─────────────
+    zarr_out = getattr(snakemake.output, "zarr", "results/integrated_pbmc.zarr")
+    log("Saving integrated dataset to Zarr store...")
+    try:
+        import shutil
+        if os.path.exists(zarr_out):
+            shutil.rmtree(zarr_out)
+            
+        # Sanitize colons from dataframe column names to prevent Windows filesystem crashes (Errno 22)
+        mdata.obs.columns = [c.replace(":", "_") for c in mdata.obs.columns]
+        mdata.var.columns = [c.replace(":", "_") for c in mdata.var.columns]
+        for mod_name in mdata.mod:
+            mdata[mod_name].obs.columns = [c.replace(":", "_") for c in mdata[mod_name].obs.columns]
+            mdata[mod_name].var.columns = [c.replace(":", "_") for c in mdata[mod_name].var.columns]
+            
+        mdata.write_zarr(zarr_out)
+        log(f"  [OK] Saved integrated dataset to: {zarr_out}")
+    except Exception as e:
+        log(f"  Failed to save Zarr store: {e}")
 
     log("Done. Analysis complete.")
 

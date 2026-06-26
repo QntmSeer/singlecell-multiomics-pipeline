@@ -9,7 +9,8 @@ rule all:
         "results/plots/umap_multivi.png",
         "results/plots/cellrank_trajectory.png",
         "results/plots/umap_markers.png",
-        "results/plots/trajectory_pseudotime.png"
+        "results/plots/trajectory_pseudotime.png",
+        "results/integrated_pbmc.zarr"
 
 # Include modular rules
 include: "rules/qc.smk"

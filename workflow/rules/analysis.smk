@@ -9,6 +9,7 @@ rule analysis:
         cellrank_trajectory = "results/plots/cellrank_trajectory.png",
         umap_markers = "results/plots/umap_markers.png",
         trajectory_paga = "results/plots/trajectory_paga.png",
-        trajectory_pseudotime = "results/plots/trajectory_pseudotime.png"
+        trajectory_pseudotime = "results/plots/trajectory_pseudotime.png",
+        zarr = directory("results/integrated_pbmc.zarr")
     script:
         "../../scripts/analysis.py"
