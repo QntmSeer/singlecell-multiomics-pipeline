@@ -2,12 +2,12 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Snakemake](https://img.shields.io/badge/Snakemake-Workflow-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![Version](https://img.shields.io/badge/version-v1.0.0--stable--local-green)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Version](https://img.shields.io/badge/version-v2.0.0--stable--local-green)
 
 ## 📽️ Project Overview
 
-This repository contains a reproducible, containerized bioinformatics pipeline for the analysis of **single-cell multi-omics data (scRNA-seq + scATAC-seq)**. The workflow is built using **Snakemake** and utilises **Scanpy** and **Muon** for the integration of transcriptomic and chromatin accessibility modalities.
+This repository contains a reproducible, containerized bioinformatics pipeline for the analysis of **single-cell multi-omics data (scRNA-seq + scATAC-seq)**. The workflow is built using **Snakemake** and utilizes **Scanpy**, **Muon**, and **scvi-tools** for the joint integration of transcriptomic and chromatin accessibility modalities.
 
 ### 🔬 Biological Context
 
@@ -15,47 +15,54 @@ This repository contains a reproducible, containerized bioinformatics pipeline f
 
 This pipeline targets the **10x Genomics Multiome (RNA + ATAC)** dataset to:
 1. Identify distinct immune cell subsets (T-cells, B-cells, Monocytes, NK cells).
-2. Correlate chromatin accessibility at promoter regions with gene expression.
-3. Highlight regulatory elements potentially driving inflammatory responses in specific cell populations.
+2. Integrate transcriptomics and chromatin accessibility using **WNN (Weighted Nearest Neighbor)** and **MultiVI (Deep Generative Variational Autoencoders)**.
+3. Perform trajectory inference and probabilistic fate mapping on the monocyte differentiation continuum using **CellRank 2** (GPCCA).
+4. Highlight regulatory elements potentially driving inflammatory responses in specific cell populations.
 
 ## 🛠️ Pipeline Architecture
 
 ```
-Raw Data (10x HDF5 + ATAC Fragments)
+Raw H5 Data Download (Automated)
         │
         ▼
    ┌─────────┐
-   │   QC    │  ← Filter low-quality cells, remove doublets
+   │   QC    │  ← Calculate cell QC metrics, export MultiQC JSON
    └────┬────┘
-        │
-        ▼
-   ┌───────────────┐
-   │ Preprocessing │  ← Normalize, Log1p, HVG selection
-   └──────┬────────┘
-          │
-          ▼
-   ┌──────────────┐
-   │  Dim. Reduc. │  ← PCA (RNA), LSI (ATAC), UMAP
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │  WNN Integr. │  ← Weighted Nearest Neighbor (RNA + ATAC)
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │  Clustering  │  ← Leiden algorithm on WNN graph
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │   Plotting   │  ← UMAP, Dotplots, QC metrics
-   └──────────────┘
+        ├──────────────────────────┐
+        ▼                          ▼
+ ┌───────────────┐          ┌───────────────┐
+ │ RNA Modality  │          │ ATAC Modality │
+ │ Normalize/HVG │          │ TF-IDF / LSI  │
+ └──────┬────────┘          └──────┬────────┘
+        │                          │
+        ▼                          ▼
+ ┌──────────────────────────────────────────┐
+ │           Joint Integration              │
+ ├──────────────────────────────────────────┤
+ │  • WNN Integration (Heuristic Neighbors) │
+ │  • MultiVI Deep Generative Model (VAE)   │
+ └──────────────────┬───────────────────────┘
+                    │
+                    ▼
+          ┌───────────────────┐
+          │ Trajectory & Fate │
+          ├───────────────────┤
+          │ • Diffusion Time  │
+          │ • PAGA Graph      │
+          │ • CellRank 2      │
+          └─────────┬─────────┘
+                    │
+                    ▼
+          ┌───────────────────┐
+          │     Plotting      │  ← RNA, ATAC, WNN, MultiVI,
+          └───────────────────┘    CellRank Trajectories, MultiQC
 ```
 
-### What is WNN Integration?
-**Weighted Nearest Neighbor (WNN)** integration jointly embeds RNA and ATAC modalities by learning cell-specific weights for each modality. Cells where chromatin accessibility is more informative get higher ATAC weight; cells with cleaner gene expression get higher RNA weight. This produces a more biologically accurate cell embedding than either modality alone — critical for identifying rare immune subsets in inflammatory contexts.
+### Advanced Publication Integrations
+- **MultiVI (Nature Methods, 2022):** A deep generative model (VAE) that jointly embeds RNA + ATAC modalities to capture non-linear interactions, correct batch effects, and handle data sparsity.
+- **CellRank 2 (Nature Methods, 2024):** A unified fate mapping framework using a Markov chain-based GPCCA estimator to calculate absorption/fate probabilities towards specific endpoints.
+- **MultiVelo Template (Nature Biotechnology, 2023):** Included template for chromatin-coupled velocity modeling.
+- **SCENIC+ Template (Nature Methods, 2023):** Included template for enhancer-driven Gene Regulatory Network (eGRN) mapping.
 
 ## 📂 Repository Structure
 
@@ -66,14 +73,16 @@ singlecell-multiomics-pipeline/
 ├── workflow/           # Snakemake workflow definition
 │   ├── Snakefile
 │   └── rules/
-│       ├── qc.smk
-│       └── analysis.smk
+│       ├── qc.smk      # Automated download and MultiQC
+│       └── analysis.smk # Modality processing and trajectory mapping
 ├── envs/               # Conda environment definitions
 │   └── sc-omics.yaml
-├── scripts/            # Analysis scripts
-│   ├── analysis.py
-│   ├── qc_check.py
-│   └── download_data.sh
+├── scripts/            # Analysis and plotting scripts
+│   ├── analysis.py     # Main pipeline processing and trajectory
+│   ├── qc_check.py     # Performs QC and exports MultiQC stats
+│   ├── generate_plots.py # Standalone plotting script
+│   ├── multivelo_analysis.py # Template for chromatin velocity
+│   └── scenicplus_analysis.py # Template for eGRN inference
 ├── results/            # Output plots and tables (not committed)
 ├── data/               # Input data directory (not committed)
 ├── Dockerfile
@@ -83,14 +92,15 @@ singlecell-multiomics-pipeline/
 ## 🛰️ Usage
 
 ### Tested Environment
-- Python 3.9
-- `numpy==1.26.4`
-- `scanpy==1.9.3`
-- `anndata==0.8.0`
-- `muon` (compatible release)
-- `leidenalg`, `pandas`, `matplotlib`, `seaborn`
+- Python 3.10 - 3.14
+- `scanpy>=1.10`
+- `muon` / `mudata`
+- `scvi-tools>=1.1`
+- `cellrank>=2.0`
+- `pytorch` / `jax` / `jaxlib`
+- `multiqc`
 
-> **Note:** These versions are pinned in `envs/sc-omics.yaml` to avoid ecosystem drift between `muon`, `anndata`, and `numpy`.
+All dependencies are defined in `envs/sc-omics.yaml`.
 
 ### Installation
 
@@ -108,61 +118,42 @@ singlecell-multiomics-pipeline/
 
 ### Running the Workflow
 
-1. Download the data:
-   ```bash
-   bash scripts/download_data.sh
-   ```
+The Snakemake workflow is fully automated. The HDF5 dataset will download automatically on the first run:
 
-2. Run the pipeline:
-   ```bash
-   snakemake --cores 4
-   ```
+```bash
+snakemake --cores 8
+```
 
-3. If you encounter Snakemake cache issues, clean and retry:
-   ```bash
-   rm -rf .snakemake
-   snakemake --cores 4
-   ```
+To re-run specifically the analysis and plotting:
+```bash
+snakemake --cores 8 --force analysis
+```
+
+To run the standalone plotting script directly without Snakemake:
+```bash
+python scripts/generate_plots.py
+```
 
 ## 📊 Expected Outputs
 
 | Output | Location | Description |
 |--------|----------|-------------|
-| QC Metrics | `results/qc/qc_metrics.txt` | Per-cell QC summary (generated at runtime) |
-| MultiQC Report | `results/qc/multiqc_report.html` | Aggregated QC (generated at runtime) |
-| RNA UMAP | `example_results/umap_rna.png` | UMAP based on RNA expression (WNN clusters) |
-| ATAC UMAP | `example_results/umap_atac.png` | UMAP based on Chromatin Accessibility (LSI) |
-| WNN UMAP | `example_results/umap_wnn.png` | Joint Multi-Modal Integration (Weighted Nearest Neighbors) |
-| Marker Genes | `example_results/umap_markers.png` | Immune cell marker expression (CD3D, CD14, MS4A1, GNLY) |
-| Pseudotime UMAP | `example_results/trajectory_pseudotime.png` | Continuous developmental timeline (Classical $\to$ Non-Classical) |
-
-## 🖼️ Example Results
-
-> Generated from 10k PBMC Multiome dataset (10x Genomics). **Phase 2 Update:** Now featuring true multi-modal integration (WNN).
-
-**1. WNN Integrated UMAP (Best Separation)**
-![WNN UMAP](example_results/umap_wnn.png)
-
-**2. RNA Modality UMAP**
-![RNA UMAP](example_results/umap_rna.png)
-
-**3. ATAC Modality UMAP**
-![ATAC UMAP](example_results/umap_atac.png)
-
-**4. Immune Marker Genes**
-![Marker Gene UMAP](example_results/umap_markers.png)
-
-**Phase 3: Trajectory Inference (Monocyte Differentiation)**
-> Modeling the transition from **Classical Monocytes** ($CD14^{high}$) to **Non-Classical Monocytes** ($FCGR3A^+$) using PAGA and Diffusion Pseudotime. This demonstrates the pipeline's ability to unravel cellular heterogeneity and dynamic adaptation.
-
-**5. Developmental Pseudotime**
-![Pseudotime UMAP](example_results/trajectory_pseudotime.png)
+| QC Metrics Table | `results/qc/qc_metrics_mqc.json` | Custom JSON table for MultiQC reporting |
+| MultiQC Report | `results/qc/multiqc_report.html` | Aggregated HTML quality control report |
+| RNA UMAP | `results/plots/umap_rna.png` | UMAP based on RNA expression (WNN clusters) |
+| ATAC UMAP | `results/plots/umap_atac.png` | UMAP based on Chromatin Accessibility (LSI) |
+| WNN UMAP | `results/plots/umap_wnn.png` | Weighted Nearest Neighbors joint integration |
+| MultiVI UMAP | `results/plots/umap_multivi.png` | Deep generative joint latent representation (MultiVI) |
+| Marker Genes | `results/plots/umap_markers.png` | Immune marker expression profiles (`CD3D`, `CD14`, `MS4A1`, `GNLY`) |
+| PAGA Graph | `results/plots/trajectory_paga.png` | Cluster-level connectivity graph for monocytes |
+| CellRank 2 Trajectory | `results/plots/cellrank_trajectory.png` | GPCCA macrostates and fate absorption probabilities |
+| Pseudotime Timeline | `results/plots/trajectory_pseudotime.png` | Continuous developmental timeline (Classical $\to$ Non-Classical) |
 
 ## 🐳 Docker
 
 ```bash
 docker build -t sc-omics-pipeline .
-docker run -v $(pwd)/data:/app/data -v $(pwd)/results:/app/results sc-omics-pipeline snakemake --cores 4
+docker run -v $(pwd)/data:/app/data -v $(pwd)/results:/app/results sc-omics-pipeline snakemake --cores 8
 ```
 
 ## 📄 License
@@ -171,5 +162,5 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 ## 🔗 Data Source
 
-[10k Human PBMCs, Multiome v1.0, Chromium X - 10x Genomics](https://www.10xgenomics.com/datasets/10-k-human-pbm-cs-multiome-v-1-0-chromium-x-1-standard-2-0-0)
+[10k Human PBMCs, Multiome v1.0, Chromium X - 10x Genomics](https://www.10xgenomics.com/datasets/10-k-human-pbm-cs-multiome-v-1-0-chromium-x-1-standard-2-0-0)  
 Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
