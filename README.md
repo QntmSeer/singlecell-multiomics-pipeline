@@ -26,7 +26,7 @@ Raw H5 Data Download (Automated)
         │
         ▼
    ┌─────────┐
-   │   QC    │  ← Calculate cell QC metrics, export MultiQC JSON
+   │   QC    │  <- Calculate cell QC metrics, export MultiQC JSON
    └────┬────┘
         ├──────────────────────────┐
         ▼                          ▼
@@ -54,7 +54,7 @@ Raw H5 Data Download (Automated)
                     │
                     ▼
           ┌───────────────────┐
-          │     Plotting      │  ← RNA, ATAC, WNN, MultiVI,
+          │     Plotting      │  <- RNA, ATAC, WNN, MultiVI,
           └───────────────────┘    CellRank Trajectories, MultiQC
 ```
 
@@ -147,7 +147,7 @@ python scripts/generate_plots.py
 | Marker Genes | `results/plots/umap_markers.png` | Immune marker expression profiles (`CD3D`, `CD14`, `MS4A1`, `GNLY`) |
 | PAGA Graph | `results/plots/trajectory_paga.png` | Cluster-level connectivity graph for monocytes |
 | CellRank 2 Trajectory | `results/plots/cellrank_trajectory.png` | GPCCA macrostates and fate absorption probabilities |
-| Pseudotime Timeline | `results/plots/trajectory_pseudotime.png` | Continuous developmental timeline (Classical $\to$ Non-Classical) |
+| Pseudotime Timeline | `results/plots/trajectory_pseudotime.png` | Continuous developmental timeline (Classical -> Non-Classical) |
 
 ## 🐳 Docker
 
