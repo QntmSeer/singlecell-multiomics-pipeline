@@ -1,4 +1,9 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Single-Cell Multi-Omics Pipeline Logo" width="200"/>
+</p>
+
 # Single-Cell Multi-Omics Pipeline for Inflammation Analysis
+
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Snakemake](https://img.shields.io/badge/Snakemake-Workflow-blue.svg)
